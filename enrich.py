@@ -9,17 +9,17 @@ from rules import (
     rule_payment_rail,
     rule_ecommerce_purchase,
     rule_credit_card_payment,
+    rule_rag_fallback,
     rule_fallback
 )
 
-# Data-driven rule orchestration: Define a single ordered RULES list
-# Priority Order (highest -> lowest)
 RULES: List[Callable[[str, float], Any]] = [
     rule_tax_related,
     rule_specific_merchant,
     rule_payment_rail,
     rule_ecommerce_purchase,
     rule_credit_card_payment,
+    rule_rag_fallback,
 ]
 
 def enrich_transaction_record(row) -> EnrichedTransactionSchema:
@@ -28,8 +28,6 @@ def enrich_transaction_record(row) -> EnrichedTransactionSchema:
 
     enriched_data: EnrichedTransactionSchema = {}
 
-    # Orchestrator owns routing + metadata only
-    # Iterate over rules in order, first non-None result wins
     for rule_func in RULES:
         result = rule_func(description, amount_usd)
         if result:
@@ -39,7 +37,6 @@ def enrich_transaction_record(row) -> EnrichedTransactionSchema:
             enriched_data["RuleHit"] = rule_id
             return enriched_data
 
-    # Use fallback rule only if no rules match
     fields, confidence, rule_id = rule_fallback(description, amount_usd)
     enriched_data.update(fields)
     enriched_data["Confidence"] = confidence
@@ -51,8 +48,6 @@ def enrich_transactions(input_file: str, output_file: str):
 
     enriched_df = df.apply(enrich_transaction_record, axis=1, result_type='expand')
 
-    # Strict schema enforcement: Assert at runtime that enriched output contains exactly the keys
-    # defined in EnrichedTransactionSchema
     expected_columns = set(EnrichedTransactionSchema.__annotations__.keys())
     actual_columns = set(enriched_df.columns)
 
@@ -67,22 +62,14 @@ def enrich_transactions(input_file: str, output_file: str):
             error_message += f"Extra columns: {extra_columns}."
         raise ValueError(error_message)
 
-    # Ensure columns are in the correct order as per schema
     enriched_df = enriched_df[list(EnrichedTransactionSchema.__annotations__.keys())]
 
-    # Original columns from preprocess.py that should be preserved in the final output.
     original_preserved_columns = ['TransactionDate', 'Description', 'Category', 'AmountUSD', 'Balance']
     
-    # Combine original preserved columns with the new enriched columns
-    # Ensure original_preserved_columns are at the beginning
     final_output_df = pd.concat([df[original_preserved_columns], enriched_df], axis=1)
     
-    # Now, ensure all schema columns are present and in the correct order
-    # This also handles cases where some schema fields might overlap with original_preserved_columns
-    # and ensures no duplication or incorrect ordering.
     all_expected_columns_ordered = original_preserved_columns + [col for col in list(EnrichedTransactionSchema.__annotations__.keys()) if col not in original_preserved_columns]
     
-    # Reorder the final DataFrame according to all_expected_columns_ordered
     df = final_output_df[all_expected_columns_ordered]
 
     df.to_excel(output_file, index=False)

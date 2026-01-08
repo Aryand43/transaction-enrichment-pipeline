@@ -1,7 +1,6 @@
 import re
-from typing import Dict, Any, Optional, Tuple
+from typing import Dict, Any, Optional, Tuple, List
 
-# Lookup Maps
 MERCHANT_LOOKUP = {
     "capital one": "Capital One",
     "shopify capital": "Shopify Capital",
@@ -18,11 +17,54 @@ PAYMENT_RAIL_KEYWORDS = [
     "visa", "zelle", "paypal", "afterpay", "mastercard", "amex", "square", "stripe"
 ]
 
-# Helper function for keyword presence
+KB_MERCHANTS: List[Dict[str, Any]] = [
+    {
+        "surface_forms": ["shoppay", "shopify", "shop pay"],
+        "normalized_entity": "Shopify",
+        "transaction_classification": "Ecommerce Platform Fee",
+        "explanation": "Transaction related to Shopify e-commerce platform."
+    },
+    {
+        "surface_forms": ["tiktok inc", "tiktok shop"],
+        "normalized_entity": "TikTok",
+        "transaction_classification": "Social Media Advertising",
+        "explanation": "Transaction related to TikTok advertising or shopping."
+    },
+    {
+        "surface_forms": ["paychex"],
+        "normalized_entity": "Paychex",
+        "transaction_classification": "Payroll Service",
+        "explanation": "Transaction for payroll services provided by Paychex."
+    },
+    {
+        "surface_forms": ["mbfs.com"],
+        "normalized_entity": "MBFS",
+        "transaction_classification": "Financial Service",
+        "explanation": "Transaction related to MBFS financial services."
+    },
+    {
+        "surface_forms": ["global - e", "global-e"],
+        "normalized_entity": "Global-e",
+        "transaction_classification": "Cross-Border Ecommerce",
+        "explanation": "Transaction related to Global-e cross-border e-commerce solutions."
+    },
+    {
+        "surface_forms": ["wayflyer"],
+        "normalized_entity": "Wayflyer",
+        "transaction_classification": "Revenue-Based Financing",
+        "explanation": "Transaction related to Wayflyer revenue-based financing."
+    },
+    {
+        "surface_forms": ["walmart"],
+        "normalized_entity": "Walmart",
+        "transaction_classification": "Retail Purchase",
+        "explanation": "Retail purchase at Walmart."
+    }
+]
+
 def is_keyword_present(text: str, keywords: list[str]) -> bool:
     return any(re.search(r'\b' + re.escape(keyword) + r'\b', text, re.IGNORECASE) for keyword in keywords)
 
-# Rule Functions
 def rule_tax_related(
     description: str,
     amount_usd: float
@@ -103,6 +145,24 @@ def rule_credit_card_payment(
             "IsCreditCardExpense": True,
             "Reason": "Credit card payment identified."
         }, 0.7, "RULE_CREDIT_CARD_PAYMENT"
+    return None
+
+def rule_rag_fallback(
+    description: str,
+    amount_usd: float
+) -> Optional[Tuple[Dict[str, Any], float, str]]:
+    description_lower = description.lower()
+    for entry in KB_MERCHANTS:
+        for surface_form in entry["surface_forms"]:
+            if surface_form in description_lower:
+                return {
+                    "TransactionClassification": entry["transaction_classification"],
+                    "MerchantClassification": entry["normalized_entity"],
+                    "NormalizedEntity": entry["normalized_entity"],
+                    "TransactionName": description,
+                    "IsCreditCardExpense": False,
+                    "Reason": f"RAG match based on: {surface_form} - {entry["explanation"]}"
+                }, 0.6, "RULE_RAG_FALLBACK"
     return None
 
 def rule_fallback(
